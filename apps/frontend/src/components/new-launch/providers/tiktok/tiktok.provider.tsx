@@ -26,7 +26,7 @@ import { TikTokLocationSelector } from '@gitroom/frontend/components/new-launch/
 const TikTokSettings: FC<{
   values?: any;
 }> = (props) => {
-  const { watch, register } = useSettings();
+  const { watch, register, setValue } = useSettings();
   const { value, integration } = useIntegration();
   const t = useT();
   const customFunc = useCustomProviderFunction();
@@ -60,6 +60,15 @@ const TikTokSettings: FC<{
   const privacy_level = watch('privacy_level');
   const content_posting_method = watch('content_posting_method');
   const isUploadMode = content_posting_method === 'UPLOAD';
+
+  // TikTok forbids branded content on Self only visibility; if privacy flips
+  // to SELF_ONLY with the toggle already on, clear it instead of sending an
+  // invalid combination.
+  useEffect(() => {
+    if (privacy_level === 'SELF_ONLY' && brand_content_toggle) {
+      setValue('brand_content_toggle', false);
+    }
+  }, [privacy_level, brand_content_toggle, setValue]);
 
   // TikTok ignores every setting except the title / content when the posting
   // method is UPLOAD, so we hide them rather than pretend they apply. The fields
