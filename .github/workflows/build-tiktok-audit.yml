@@ -1,0 +1,41 @@
+name: Build TikTok-audit image
+
+# Builds a custom Postiz image (v2.24.0 + the TikTok Direct Post audit-UX patch)
+# and pushes it to ghcr.io/dezgdny/postiz-app. amd64 only (the target VM is x86).
+on:
+  workflow_dispatch:
+  push:
+    branches: [tiktok-audit-port]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push (amd64)
+        run: |
+          docker buildx build --platform linux/amd64 \
+            -f Dockerfile.dev \
+            -t ghcr.io/dezgdny/postiz-app:tiktok-audit \
+            -t ghcr.io/dezgdny/postiz-app:tiktok-audit-${{ github.sha }} \
+            --build-arg NEXT_PUBLIC_VERSION=v2.24.0-tiktok-audit \
+            --pull --no-cache \
+            --provenance=false --sbom=false \
+            --push .
