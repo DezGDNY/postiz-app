@@ -22,6 +22,18 @@ import { createReadStream } from 'fs';
 import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import { Integration } from '@prisma/client';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import { DashboardFunction } from '@gitroom/nestjs-libraries/integrations/dashboard.function.decorator';
+
+// TikTok access tokens last 2 h from 1 Dec 2026 (24 h before). Use the lifetime
+// TikTok returns (`expires_in`, seconds) instead of a fixed 23 h, and refresh
+// 5 min early so a long video upload never starts on a token about to expire.
+// If the field is missing, assume the documented 2 h: refreshing early is
+// harmless, refreshing late breaks posting.
+const TOKEN_SKEW_SECONDS = 5 * 60;
+function accessTokenLifetime(expiresIn: unknown): number {
+  const seconds = Number(expiresIn) > 0 ? Number(expiresIn) : 2 * 60 * 60;
+  return Math.max(60, seconds - TOKEN_SKEW_SECONDS);
+}
 
 @Rules(
   [
@@ -301,7 +313,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
       refresh_token: refreshToken,
     };
 
-    const { access_token, refresh_token, ...all } = await (
+    const { access_token, refresh_token, expires_in, ...all } = await (
       await fetch('https://open.tiktokapis.com/v2/oauth/token/', {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -329,7 +341,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
 
     return {
       refreshToken: refresh_token,
-      expiresIn: dayjs().add(23, 'hours').unix() - dayjs().unix(),
+      expiresIn: accessTokenLifetime(expires_in),
       accessToken: access_token,
       id: open_id.replace(/-/g, ''),
       name: display_name,
@@ -378,7 +390,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
       }${process?.env?.FRONTEND_URL}/integrations/social/tiktok`,
     };
 
-    const { access_token, refresh_token, scope } = await (
+    const { access_token, refresh_token, expires_in, scope } = await (
       await fetch('https://open.tiktokapis.com/v2/oauth/token/', {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -411,7 +423,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
       name: display_name,
       accessToken: access_token,
       refreshToken: refresh_token,
-      expiresIn: dayjs().add(23, 'hours').unix() - dayjs().unix(),
+      expiresIn: accessTokenLifetime(expires_in),
       picture: avatar_url,
       username: username,
     };
@@ -441,6 +453,9 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
   // Audit: fetch the authenticated creator's info (nickname/avatar, allowed
   // privacy levels, interaction permissions, max duration) so the composer can
   // present a TikTok-compliant Direct Post UI driven by creator_info.
+  // The composer calls this via POST /integrations/function, which (since
+  // CVE-2026-115931) only runs @Tool or @DashboardFunction methods.
+  @DashboardFunction()
   async creatorInfo(accessToken: string) {
     const { data } = await (
       await this.fetch(
